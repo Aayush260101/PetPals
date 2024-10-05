@@ -15,25 +15,34 @@ import entity.CashDonation;
 import entity.ItemDonation;
 import entity.AdoptionEvent;
 import entity.Participant;
-import entity.AdoptionEventManager; // Import the new class
+import entity.AdoptionEventManager;
 import exception.InvalidPetAgeException;
-import util.DatabaseContext;
+import util.DBConnUtil;
+import util.DBPropertyUtil;
 
 public class MainModule {
-    private static PetShelter petShelter;  // To manage the shelter
-    private static AdoptionEventManager eventManager; // To manage adoption events
-    private static DatabaseContext dbContext = new DatabaseContext();  // To manage database connection
+    private static PetShelter petShelter;
+    private static AdoptionEventManager eventManager;
+    private static DBConnUtil dbConnUtil = new DBConnUtil(); // Database connection utility
 
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
         Connection connection = null;
 
         try {
-            connection = dbContext.getConnection(); // Obtain the connection
-            petShelter = new PetShelter(connection); // Pass connection to PetShelter
-            eventManager = new AdoptionEventManager(connection); // Initialize the event manager
-            System.out.println("Database connected successfully!");
+            // Load the database connection from db.properties
+            connection = dbConnUtil.getConnectionFromProperties("db.properties");
+            
+            if (connection != null) {
+                petShelter = new PetShelter(connection);  // Pass connection to PetShelter
+                eventManager = new AdoptionEventManager(connection);  // Pass connection to Event Manager
+                System.out.println("Database connected successfully!");
+            } else {
+                System.out.println("Failed to establish database connection.");
+                return; // Exit the program if connection fails
+            }
 
+            // Main loop
             while (true) {
                 System.out.println("\nWelcome to PetPals!");
                 System.out.println("1. Add Pet");
@@ -41,17 +50,18 @@ public class MainModule {
                 System.out.println("3. Remove Pet");
                 System.out.println("4. Make a Donation");
                 System.out.println("5. View All Donations");
-                System.out.println("6. Manage Adoption Events"); // New option
+                System.out.println("6. Manage Adoption Events");
                 System.out.println("7. Exit");
                 System.out.print("Enter your choice: ");
                 int choice = scanner.nextInt();
-                
+                scanner.nextLine();  // Consume newline
+
                 switch (choice) {
                     case 1:
                         addPet(scanner);
                         break;
                     case 2:
-                        listAvailablePets(); // List pets
+                        listAvailablePets();
                         break;
                     case 3:
                         removePet(scanner);
@@ -60,14 +70,14 @@ public class MainModule {
                         makeDonation(scanner);
                         break;
                     case 5:
-                        viewAllDonations(); // View all donations
+                        viewAllDonations();
                         break;
                     case 6:
-                        manageAdoptionEvents(scanner); // Manage events
+                        manageAdoptionEvents(scanner);
                         break;
                     case 7:
                         System.out.println("Exiting the application.");
-                        dbContext.closeConnection(); // Close the connection
+                        dbConnUtil.closeConnection(); // Close the connection
                         System.out.println("Database connection closed.");
                         scanner.close();
                         System.exit(0);
@@ -79,55 +89,56 @@ public class MainModule {
             System.out.println("Error connecting to the database: " + e.getMessage());
         } catch (Exception e) {
             System.out.println("An unexpected error occurred: " + e.getMessage());
+        } finally {
+            dbConnUtil.closeConnection(); // Ensure the connection is closed
         }
     }
 
-    // Method to add a pet
+    // Add a new pet
     private static void addPet(Scanner scanner) {
         System.out.print("Enter pet type (dog/cat): ");
-        String type = scanner.next();
+        String type = scanner.nextLine();
         System.out.print("Enter pet name: ");
-        String name = scanner.next();
-        
+        String name = scanner.nextLine();
+
         int age = 0;
         while (true) {
             System.out.print("Enter pet age: ");
             try {
-                age = scanner.nextInt();
+                age = Integer.parseInt(scanner.nextLine());
                 if (age <= 0) {
                     throw new InvalidPetAgeException("Pet age must be a positive integer.");
                 }
                 break;
             } catch (InvalidPetAgeException e) {
                 System.out.println(e.getMessage());
-            } catch (Exception e) {
+            } catch (NumberFormatException e) {
                 System.out.println("Please enter a valid integer for age.");
-                scanner.next(); // Clear invalid input
             }
         }
-        
+
         System.out.print("Enter pet breed: ");
-        String breed = scanner.next();
+        String breed = scanner.nextLine();
 
         Pet pet;
         if (type.equalsIgnoreCase("dog")) {
             System.out.print("Enter dog breed: ");
-            String dogBreed = scanner.next();
+            String dogBreed = scanner.nextLine();
             pet = new Dog(name, age, breed, dogBreed);
         } else if (type.equalsIgnoreCase("cat")) {
             System.out.print("Enter cat color: ");
-            String catColor = scanner.next();
+            String catColor = scanner.nextLine();
             pet = new Cat(name, age, breed, catColor);
         } else {
             System.out.println("Invalid pet type!");
-            return; // Exit the method if pet type is invalid
+            return;
         }
-        
-        petShelter.addPet(pet); // Add pet to the shelter
+
+        petShelter.addPet(pet);  // Add the pet to the shelter
         System.out.println("Pet added successfully!");
     }
 
-    // Method to list all available pets
+    // List all available pets
     private static void listAvailablePets() {
         List<Pet> pets = petShelter.getAvailablePets();
         if (pets.isEmpty()) {
@@ -140,19 +151,16 @@ public class MainModule {
         }
     }
 
-    // Method to remove a pet
+    // Remove a pet
     private static void removePet(Scanner scanner) {
         System.out.print("Enter the name of the pet to remove: ");
-        String petName = scanner.next();
-        
-        Pet petToRemove = null;
-        for (Pet pet : petShelter.getAvailablePets()) { // Use getAvailablePets() method
-            if (pet.getName().equalsIgnoreCase(petName)) {
-                petToRemove = pet;
-                break;
-            }
-        }
-        
+        String petName = scanner.nextLine();
+
+        Pet petToRemove = petShelter.getAvailablePets().stream()
+            .filter(pet -> pet.getName().equalsIgnoreCase(petName))
+            .findFirst()
+            .orElse(null);
+
         if (petToRemove != null) {
             petShelter.removePet(petToRemove);
             System.out.println(petName + " has been removed from the shelter.");
@@ -161,49 +169,45 @@ public class MainModule {
         }
     }
 
-    // Method to make a donation
+    // Make a donation
     private static void makeDonation(Scanner scanner) {
         System.out.print("Enter your name: ");
-        String donorName = scanner.next();
-        double amount = 0.0;
-        boolean validAmount = false;
+        String donorName = scanner.nextLine();
 
-        // Loop until a valid amount is entered
-        while (!validAmount) {
+        double amount = 0.0;
+        while (true) {
             System.out.print("Enter donation amount: ");
             try {
-                amount = scanner.nextDouble();
+                amount = Double.parseDouble(scanner.nextLine());
                 if (amount <= 0) {
-                    System.out.println("Donation amount must be greater than zero. Please try again.");
+                    System.out.println("Donation amount must be greater than zero.");
                 } else {
-                    validAmount = true; // Valid amount entered
+                    break;
                 }
-            } catch (Exception e) {
-                System.out.println("Please enter a valid number for the donation amount.");
-                scanner.next(); // Clear the invalid input
+            } catch (NumberFormatException e) {
+                System.out.println("Please enter a valid amount.");
             }
         }
-        
+
         System.out.println("Select donation type:");
         System.out.println("1. Cash Donation");
         System.out.println("2. Item Donation");
         System.out.print("Enter your choice: ");
-        
         int donationChoice = scanner.nextInt();
+        scanner.nextLine();  // Consume newline
 
         switch (donationChoice) {
             case 1:
                 System.out.print("Enter donation date (YYYY-MM-DD): ");
-                String dateInput = scanner.next();
-                LocalDate donationDate = LocalDate.parse(dateInput); // Parse the date input
+                LocalDate donationDate = LocalDate.parse(scanner.nextLine());
                 CashDonation cashDonation = new CashDonation(donorName, amount, donationDate);
-                petShelter.addCashDonation(cashDonation); // Record the cash donation
+                petShelter.addCashDonation(cashDonation);
                 break;
             case 2:
                 System.out.print("Enter item type (e.g., food, toys): ");
-                String itemType = scanner.next();
+                String itemType = scanner.nextLine();
                 ItemDonation itemDonation = new ItemDonation(donorName, amount, itemType);
-                petShelter.addItemDonation(itemDonation); // Record the item donation
+                petShelter.addItemDonation(itemDonation);
                 break;
             default:
                 System.out.println("Invalid donation type!");
@@ -211,10 +215,9 @@ public class MainModule {
         }
     }
 
-    // Method to view all donations
- // Method to view all donations
+    // View all donations
     private static void viewAllDonations() {
-        List<Donation> donations = petShelter.getAllDonations(); // Get all donations
+        List<Donation> donations = petShelter.getAllDonations();
         if (donations.isEmpty()) {
             System.out.println("No donations available.");
         } else {
@@ -225,13 +228,13 @@ public class MainModule {
         }
     }
 
-
-    // New method to manage adoption events
+    // Manage adoption events
     private static void manageAdoptionEvents(Scanner scanner) {
         System.out.println("1. View Upcoming Adoption Events");
         System.out.println("2. Register for an Event");
         System.out.print("Enter your choice: ");
         int choice = scanner.nextInt();
+        scanner.nextLine();  // Consume newline
 
         switch (choice) {
             case 1:
@@ -246,7 +249,7 @@ public class MainModule {
         }
     }
 
-    // Method to view upcoming events
+    // View upcoming adoption events
     private static void viewUpcomingEvents() {
         List<AdoptionEvent> events = eventManager.getUpcomingEvents();
         if (events.isEmpty()) {
@@ -259,16 +262,18 @@ public class MainModule {
         }
     }
 
-    // Method to register for an event
+    // Register for an event
     private static void registerForEvent(Scanner scanner) {
         System.out.print("Enter the event ID you want to register for: ");
         int eventId = scanner.nextInt();
+        scanner.nextLine();  // Consume newline
         System.out.print("Enter your name: ");
-        String participantName = scanner.next();
+        String participantName = scanner.nextLine();
         System.out.print("Enter your email: ");
-        String participantEmail = scanner.next();
+        String participantEmail = scanner.nextLine();
 
         Participant participant = new Participant(eventId, participantName, participantEmail);
-        eventManager.registerParticipant(participant); // Register the participant
+        eventManager.registerParticipant(participant);
+        System.out.println("You have been registered for the event.");
     }
 }
